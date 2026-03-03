@@ -10,6 +10,7 @@ import { VitalsChart } from "@/components/vitals-chart";
 import { RecentAlerts } from "@/components/recent-alerts";
 import { AIInsightsPanel } from "@/components/ai-insights-panel";
 import { ClinicalIntelligenceReport } from "@/components/clinical-intelligence-report";
+import { PatientImpactReport } from "@/components/patient-impact-report";
 import type { Patient, Vital, HealthAlert, Report } from "@/lib/types";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
@@ -244,6 +245,9 @@ export function PatientDetail({ patientId, onBack }: PatientDetailProps) {
               <RecentAlerts alerts={alerts.map(a => ({ ...a, patients: { name: patient.name, patient_id: patient.patient_id } }))} />
             </CardContent>
           </Card>
+
+          {/* Multilingual Patient Impact Report */}
+          <PatientImpactReport patientId={patientId} patientName={patient.name} />
 
           {/* Reports */}
           {reports && reports.length > 0 && (
