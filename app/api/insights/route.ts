@@ -71,79 +71,72 @@ ${alerts?.map(a => `- ${a.alert_type}: ${a.message} (${a.severity})`).join('\n')
 Context: This is an elderly patient in a rural healthcare setting. Consider limited access to advanced medical facilities and the need for practical, actionable advice suitable for community health workers.
 `;
 
-// Check if GROQ_API_KEY is set
-    if (!process.env.GROQ_API_KEY) {
-      console.error('[v0] GROQ_API_KEY is not set');
-      // Return fallback insights without AI
-      const fallbackInsights = {
-        summary: `${patient.name} is a ${patient.age}-year-old patient. Based on ${vitalsList.length} recent vital readings, automated analysis is currently unavailable.`,
-        key_concerns: vitalsList.some(v => v.is_critical) 
-          ? ['Critical vital signs detected in recent readings'] 
-          : ['Regular monitoring recommended'],
-        recommendations: [
-          'Continue regular vital sign monitoring',
-          'Ensure adequate hydration',
-          'Consult healthcare provider for comprehensive assessment'
-        ],
-        risk_assessment: vitalsList.some(v => v.is_critical) ? 'high' : 'moderate',
-        follow_up_actions: ['Schedule routine health check', 'Review medication compliance']
-      };
-      return Response.json({ success: true, insights: fallbackInsights });
-    }
-
-    const result = await generateText({
+const result = await generateText({
       model: groq('llama-3.3-70b-versatile'),
-      system: `You are a medical AI assistant specialized in elderly care in rural healthcare settings. 
-Analyze patient vital signs and provide actionable insights for community health workers.
-Focus on practical recommendations that can be implemented in resource-limited settings.
-Always prioritize patient safety and recommend professional medical consultation when vital signs indicate serious concerns.
-Consider age-appropriate normal ranges for elderly patients (typically 60+ years).
+      prompt: `You are a medical AI assistant specialized in elderly care in rural healthcare settings.
 
-IMPORTANT: You must respond with ONLY a valid JSON object in this exact format, no other text:
-{
-  "summary": "A brief 2-3 sentence summary of patient health status",
-  "key_concerns": ["concern1", "concern2"],
-  "recommendations": ["recommendation1", "recommendation2"],
-  "risk_assessment": "low|moderate|high|critical",
-  "follow_up_actions": ["action1", "action2"]
-}`,
-      prompt: `Analyze the following patient data and provide health insights as JSON:\n\n${patientContext}`,
+Analyze the following patient data and provide health insights.
+
+${patientContext}
+
+Respond with a JSON object in this exact format (no markdown, no extra text):
+{"summary":"2-3 sentence summary","key_concerns":["concern1","concern2"],"recommendations":["rec1","rec2"],"risk_assessment":"low","follow_up_actions":["action1"]}
+
+Use one of: low, moderate, high, critical for risk_assessment.`,
     });
     
-    // Parse JSON from response
+    console.log("[v0] Groq response text:", result.text?.slice(0, 500));
+    
+    // Parse JSON from response - try multiple approaches
     let insights;
+    const responseText = result.text || "";
+    
+    // Try to extract JSON from the response
     try {
-      const jsonMatch = result.text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        insights = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error('No JSON found in response');
-      }
+      // First try: direct parse
+      insights = JSON.parse(responseText.trim());
     } catch {
-      // Fallback if parsing fails
+      try {
+        // Second try: find JSON object in text
+        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          insights = JSON.parse(jsonMatch[0]);
+        }
+      } catch {
+        // Fallback: use rule-based insights
+        console.log("[v0] JSON parsing failed, using fallback");
+      }
+    }
+    
+    // If parsing failed, create fallback insights
+    if (!insights) {
+      const hasAlerts = (alerts?.length || 0) > 0;
+      const hasCriticalVitals = vitalsList.some(v => v.is_critical);
+      
       insights = {
-        summary: result.text.slice(0, 200),
-        key_concerns: ['Unable to parse detailed concerns'],
-        recommendations: ['Please consult a healthcare professional'],
-        risk_assessment: 'moderate',
-        follow_up_actions: ['Schedule follow-up assessment']
+        summary: `Patient ${patient.name}, age ${patient.age}, has ${vitalsList.length} recent vital readings. ${hasAlerts ? `There are ${alerts?.length} active alerts requiring attention.` : 'No active alerts.'} ${hasCriticalVitals ? 'Some readings show critical values.' : 'Vital signs are within monitoring range.'}`,
+        key_concerns: hasAlerts || hasCriticalVitals 
+          ? ['Active health alerts detected', 'Requires close monitoring']
+          : ['Continue routine monitoring', 'Maintain healthy lifestyle'],
+        recommendations: [
+          'Monitor vital signs regularly',
+          'Ensure adequate hydration',
+          'Maintain medication schedule if prescribed',
+          hasCriticalVitals ? 'Consult healthcare provider for critical readings' : 'Continue current care plan'
+        ].filter(Boolean),
+        risk_assessment: hasCriticalVitals ? 'high' : hasAlerts ? 'moderate' : 'low',
+        follow_up_actions: [
+          'Schedule next vital signs check',
+          'Review any medication adherence',
+          hasAlerts ? 'Address active alerts' : 'Document observations'
+        ]
       };
     }
     
     return Response.json({ success: true, insights });
     
   } catch (error) {
-    console.error('[v0] AI insights error:', error instanceof Error ? error.message : error);
-    // Return fallback insights on error
-    return Response.json({ 
-      success: true, 
-      insights: {
-        summary: 'AI analysis temporarily unavailable. Please review vitals manually.',
-        key_concerns: ['Automated analysis could not be completed'],
-        recommendations: ['Review vital signs manually', 'Consult healthcare provider if concerns exist'],
-        risk_assessment: 'moderate',
-        follow_up_actions: ['Retry analysis later', 'Schedule follow-up if needed']
-      }
-    });
+    console.error('AI insights error:', error);
+    return Response.json({ error: 'Failed to generate AI insights' }, { status: 500 });
   }
 }

@@ -127,29 +127,94 @@ Please provide your analysis as a JSON object with this exact structure:
 
 Respond with ONLY the JSON object, no other text.`;
 
-    // Check if GROQ_API_KEY is set - use fallback if not
+    const result = await generateText({
+      model: groq("llama-3.3-70b-versatile"),
+      prompt,
+    });
+    
+    console.log("[v0] Clinical report Groq response:", result.text?.slice(0, 500));
+    
+    // Parse JSON from response - try multiple approaches
     let analysis;
-    if (!process.env.GROQ_API_KEY) {
-      console.error('[v0] GROQ_API_KEY is not set - using rule-based analysis');
-      analysis = generateFallbackAnalysis(patient, trends, anomalies, riskLevel, alerts);
-    } else {
+    const responseText = result.text || "";
+    
+    try {
+      // First try: direct parse
+      analysis = JSON.parse(responseText.trim());
+    } catch {
       try {
-        const result = await generateText({
-          model: groq("llama-3.3-70b-versatile"),
-          prompt,
-        });
-        
-        // Parse JSON from response
-        const jsonMatch = result.text.match(/\{[\s\S]*\}/);
+        // Second try: find JSON object in text
+        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           analysis = JSON.parse(jsonMatch[0]);
-        } else {
-          throw new Error('No JSON found');
         }
-      } catch (aiError) {
-        console.error('[v0] AI analysis failed:', aiError instanceof Error ? aiError.message : aiError);
-        analysis = generateFallbackAnalysis(patient, trends, anomalies, riskLevel, alerts);
+      } catch {
+        console.log("[v0] Clinical JSON parsing failed, using fallback");
       }
+    }
+    
+    // If parsing failed, create comprehensive fallback analysis
+    if (!analysis) {
+      const healthScore = riskLevel === 'critical' ? 'red' : riskLevel === 'high' ? 'yellow' : 'green';
+      const healthLabel = riskLevel === 'critical' ? 'Needs Immediate Attention' : 
+                          riskLevel === 'high' ? 'Monitor Closely' : 'Stable Condition';
+      
+      analysis = {
+        doctorView: {
+          clinicalObservations: `Patient ${patient.name}, ${patient.age} years old, presents with ${vitals.length} recorded vital sign measurements. ${
+            anomalies.length > 0 
+              ? `${anomalies.length} anomalies detected including ${anomalies.slice(0, 3).map(a => `${a.vital_type} (${a.severity})`).join(', ')}.`
+              : 'Vital signs within acceptable parameters for elderly patient.'
+          } Trends show: HR ${trends.heartRate.trend}, BP ${trends.systolicBP.trend}/${trends.diastolicBP.trend}, SpO2 ${trends.spo2.trend}, Temp ${trends.temperature.trend}.`,
+          diagnoses: anomalies.length > 0 
+            ? ['Vital sign variability requiring monitoring', ...new Set(anomalies.slice(0, 3).map(a => `Abnormal ${a.vital_type}`))]
+            : ['No acute concerns identified'],
+          riskFactors: [
+            patient.age >= 75 ? 'Advanced age (75+)' : 'Elderly patient',
+            ...anomalies.filter(a => a.severity === 'critical').map(a => `Critical ${a.vital_type} readings`),
+            trends.heartRate.trend === 'increasing' ? 'Increasing heart rate trend' : null,
+            trends.spo2.trend === 'decreasing' ? 'Decreasing SpO2 trend' : null,
+          ].filter(Boolean),
+          recommendedTests: [
+            'Complete blood count (CBC)',
+            'Basic metabolic panel',
+            anomalies.some(a => a.vital_type === 'heart_rate') ? 'ECG/EKG' : null,
+            anomalies.some(a => a.vital_type === 'spo2') ? 'Chest X-ray' : null,
+          ].filter(Boolean),
+          medicationConsiderations: riskLevel === 'critical' || riskLevel === 'high' 
+            ? 'Review current medications for cardiovascular and respiratory effects. Consider medication adjustments based on vital sign trends.'
+            : 'Continue current medication regimen. Monitor for any adverse effects.',
+        },
+        patientView: {
+          healthScore,
+          healthScoreLabel: healthLabel,
+          plainEnglishSummary: healthScore === 'green' 
+            ? `Good news! Your health readings look stable. Your heart rate, blood pressure, and oxygen levels are within normal range for your age.`
+            : healthScore === 'yellow'
+            ? `Your health readings show some values that need watching. This doesn't mean something is wrong, but we want to keep a close eye on things.`
+            : `Some of your health readings need attention. Please follow up with your healthcare provider soon to discuss these results.`,
+          actionableAdvice: [
+            'Take your medications as prescribed',
+            'Drink plenty of water throughout the day',
+            'Get adequate rest and sleep',
+            healthScore !== 'green' ? 'Avoid strenuous activities until cleared by your doctor' : 'Light daily exercise is encouraged',
+            'Keep track of how you feel each day',
+          ],
+          encouragement: healthScore === 'green'
+            ? 'You are doing a great job managing your health! Keep up the good work with regular monitoring.'
+            : 'Thank you for staying on top of your health. Regular monitoring helps us catch any changes early!',
+        },
+        correlations: correlationData.map(c => ({
+          vital1: c.vital1,
+          vital2: c.vital2,
+          correlation: c.correlation,
+          significance: c.correlation === 'positive' 
+            ? `When ${c.vital1} increases, ${c.vital2} tends to increase as well. This is ${c.vital1 === 'Heart Rate' && c.vital2 === 'Temperature' ? 'expected during fever or exertion' : 'worth monitoring'}.`
+            : c.correlation === 'negative'
+            ? `When ${c.vital1} increases, ${c.vital2} tends to decrease. This pattern should be monitored.`
+            : `No significant relationship found between ${c.vital1} and ${c.vital2}.`,
+        })),
+      };
     }
     
     // Get the latest vitals for current status
@@ -266,70 +331,4 @@ function pearsonCorrelation(x: number[], y: number[]): number {
   const denominator = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
   
   return denominator === 0 ? 0 : numerator / denominator;
-}
-
-// Generate fallback analysis when AI is unavailable
-function generateFallbackAnalysis(
-  patient: any,
-  trends: any,
-  anomalies: any[],
-  riskLevel: string,
-  alerts: any[] | null
-) {
-  const healthScore = riskLevel === 'critical' ? 'red' : riskLevel === 'high' ? 'yellow' : 'green';
-  
-  const riskFactors: string[] = [];
-  const diagnoses: string[] = [];
-  
-  // Analyze trends for risk factors
-  if (trends.heartRate.average > 100) {
-    riskFactors.push("Elevated resting heart rate");
-    diagnoses.push("Possible tachycardia");
-  }
-  if (trends.heartRate.average < 60) {
-    riskFactors.push("Low resting heart rate");
-    diagnoses.push("Possible bradycardia");
-  }
-  if (trends.systolicBP.average > 140) {
-    riskFactors.push("Elevated systolic blood pressure");
-    diagnoses.push("Stage 1 or Stage 2 Hypertension");
-  }
-  if (trends.spo2.average < 95) {
-    riskFactors.push("Below-normal oxygen saturation");
-    diagnoses.push("Possible hypoxemia");
-  }
-  if (trends.temperature.average > 37.5) {
-    riskFactors.push("Elevated body temperature");
-    diagnoses.push("Possible febrile condition");
-  }
-  
-  return {
-    doctorView: {
-      clinicalObservations: `${patient.name}, ${patient.age}-year-old ${patient.gender || 'patient'}. Vital signs analysis shows: HR avg ${trends.heartRate.average.toFixed(0)} bpm (${trends.heartRate.trend}), BP avg ${trends.systolicBP.average.toFixed(0)}/${trends.diastolicBP.average.toFixed(0)} mmHg, SpO2 avg ${trends.spo2.average.toFixed(1)}%, Temp avg ${trends.temperature.average.toFixed(1)}°C. ${anomalies.length} anomalies detected in the monitoring period.`,
-      diagnoses: diagnoses.length > 0 ? diagnoses : ["No significant diagnoses based on available data"],
-      riskFactors: riskFactors.length > 0 ? riskFactors : ["Age-related monitoring recommended"],
-      recommendedTests: ["Complete blood count", "Basic metabolic panel", "Thyroid function test"],
-      medicationConsiderations: riskLevel === 'high' || riskLevel === 'critical' 
-        ? "Review current medications for potential interactions affecting vitals" 
-        : null,
-    },
-    patientView: {
-      healthScore,
-      healthScoreLabel: healthScore === 'green' ? 'Good Health' : healthScore === 'yellow' ? 'Monitor Closely' : 'Needs Attention',
-      plainEnglishSummary: healthScore === 'green' 
-        ? "Your vital signs look stable. Keep up the good work with your health routines!"
-        : healthScore === 'yellow'
-        ? "Some of your readings need attention. Please follow up with your healthcare provider."
-        : "Your vital signs show some concerns. Please consult with a doctor soon.",
-      actionableAdvice: [
-        "Continue taking your medications as prescribed",
-        "Stay well hydrated with 6-8 glasses of water daily",
-        "Get 7-8 hours of restful sleep each night",
-        "Take short walks if you are able to",
-        "Avoid salty and processed foods"
-      ],
-      encouragement: "You are doing a great job monitoring your health! Regular tracking helps you and your care team make better decisions.",
-    },
-    correlations: [],
-  };
 }
