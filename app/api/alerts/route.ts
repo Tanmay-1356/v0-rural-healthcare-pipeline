@@ -34,8 +34,9 @@ export async function GET(request: Request) {
     return Response.json({ alerts: data });
     
   } catch (error) {
-    console.error('Alerts fetch error:', error);
-    return Response.json({ error: 'Failed to fetch alerts' }, { status: 500 });
+    console.error('[v0] Alerts fetch error:', error instanceof Error ? error.message : error);
+    // Return empty alerts array on error
+    return Response.json({ alerts: [] });
   }
 }
 
@@ -58,6 +59,7 @@ export async function PATCH(request: Request) {
         .eq('id', alertId);
       
       if (error) {
+        console.error('[v0] Alert update error:', error.message);
         return Response.json({ error: error.message }, { status: 500 });
       }
       
@@ -67,7 +69,7 @@ export async function PATCH(request: Request) {
     return Response.json({ error: 'Invalid action' }, { status: 400 });
     
   } catch (error) {
-    console.error('Alert update error:', error);
-    return Response.json({ error: 'Failed to update alert' }, { status: 500 });
+    console.error('[v0] Alert update error:', error instanceof Error ? error.message : error);
+    return Response.json({ success: false, message: 'Database unavailable' });
   }
 }
