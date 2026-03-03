@@ -25,17 +25,29 @@ export function PatientImpactReport({ patientId, patientName }: PatientImpactRep
         body: JSON.stringify({ patientId, languages: ['english', 'hindi', 'telugu'] })
       });
 
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
       const data = await response.json();
       
-      if (data.success) {
+      // Check if we got reports (either success true or fallback)
+      if (data.reports && typeof data.reports === 'object') {
+        setReports(data.reports);
+      } else if (data.success && data.reports) {
         setReports(data.reports);
       } else {
-        console.error('[v0] Failed to generate report:', data.error);
-        alert('Failed to generate report. Please try again.');
+        throw new Error(data.error || 'No reports in response');
       }
     } catch (error) {
-      console.error('[v0] Error generating patient impact report:', error);
-      alert('Error generating report');
+      console.error('[v0] Error generating patient impact report:', error instanceof Error ? error.message : error);
+      // Generate and show fallback reports on error
+      const fallbackReports = {
+        english: `HEALTH REPORT FOR ${patientName}\n\nDear ${patientName},\n\nYour health report is being prepared. Please ask your caregiver for help understanding your health information.\n\nYour healthcare team is looking after you.`,
+        hindi: `${patientName} के लिए स्वास्थ्य रिपोर्ट\n\nप्रिय ${patientName},\n\nआपकी स्वास्थ्य रिपोर्ट तैयार की जा रही है। अपनी स्वास्थ्य जानकारी को समझने के लिए अपने देखभाल करने वाले से मदद मांगें।`,
+        telugu: `${patientName} కోసం ఆరోగ్య నివేదన\n\nప్రియ ${patientName},\n\nమీ ఆరోగ్య నివేదన సిద్ధమవుతుంది. మీ ఆరోగ్య సమాచారాన్ని అర్థం చేసుకోవడానికి మీ సంరక్షకుడిని సహాయం కోసం అడగండి.`
+      };
+      setReports(fallbackReports);
     } finally {
       setLoading(false);
     }

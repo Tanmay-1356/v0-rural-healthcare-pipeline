@@ -109,45 +109,54 @@ function calculateStats(vitals: any[]) {
 }
 
 async function generateMultilingualReport(patient: any, stats: any, vitals: any[], alerts: any[], language: string): Promise<string> {
-  const prompt = `Generate a patient-friendly health impact report in ${language === 'english' ? 'English' : language === 'hindi' ? 'Hindi (use Devanagari script)' : 'Telugu (use Telugu script)'} for a caregiver to share with the patient.
+  // Check if GROQ_API_KEY is set
+  if (!process.env.GROQ_API_KEY) {
+    console.log(`[v0] GROQ_API_KEY not set, using fallback for ${language}`);
+    return generateFallbackReport(patient, stats, language);
+  }
 
-Patient Information:
-- Name: ${patient.name}
-- Age: ${patient.age} years
-- Gender: ${patient.gender || 'Not specified'}
-- Village: ${patient.village || 'Not specified'}
+  const languageLabel = language === 'english' ? 'English' : language === 'hindi' ? 'Hindi (use Devanagari script)' : 'Telugu (use Telugu script)';
+  
+  const prompt = `Generate a patient-friendly health impact report in ${languageLabel} for a caregiver to share with the patient.
 
-Health Statistics (Last 30 days):
-- Average Heart Rate: ${stats.avgHeartRate} bpm
-- Average Blood Pressure: ${stats.avgSystolicBP}/${stats.avgDiastolicBP} mmHg
-- Average Oxygen Level (SpO2): ${stats.avgSpO2}%
-- Average Temperature: ${stats.avgTemp}°C
-- Total Readings: ${stats.totalReadings}
-- Critical Readings: ${stats.criticalReadings}
-- Overall Trend: ${stats.trend}
-- Active Health Alerts: ${alerts.length}
+Patient: ${patient.name}, Age: ${patient.age}
 
-Generate a warm, encouraging, and easy-to-understand report that:
-1. Greets the patient and explains the purpose of the report
-2. Summarizes their recent health status in simple language
-3. Highlights positive improvements or stable conditions
-4. Lists any concerns that need attention (if any)
-5. Provides 3-4 practical health tips
-6. Ends with encouragement and next steps
+Health Stats (Last 30 days):
+- Heart Rate: ${stats.avgHeartRate} bpm
+- Blood Pressure: ${stats.avgSystolicBP}/${stats.avgDiastolicBP}
+- Oxygen: ${stats.avgSpO2}%
+- Temperature: ${stats.avgTemp}°C
+- Total Checks: ${stats.totalReadings}
+- Critical: ${stats.criticalReadings}
+- Alerts: ${alerts.length}
 
-Format: Use clear sections with headings. Write in a compassionate, patient-friendly tone that an elderly person can easily understand.`;
+Write a warm, simple report with:
+1. Greeting and purpose
+2. Health summary in simple words
+3. Positive notes or improvements
+4. Concerns (if any)
+5. 3-4 practical health tips
+6. Encouragement
+
+Keep language simple for elderly patients. Use clear sections.`;
 
   try {
+    console.log(`[v0] Generating ${language} report with Groq...`);
     const result = await generateText({
       model: groq('llama-3.3-70b-versatile'),
       prompt,
       temperature: 0.7,
-      maxTokens: 1000
+      maxTokens: 800
     });
 
+    if (!result.text || result.text.length === 0) {
+      throw new Error('Empty response from AI');
+    }
+
+    console.log(`[v0] Successfully generated ${language} report (${result.text.length} chars)`);
     return result.text;
   } catch (error) {
-    console.error(`[v0] Error generating ${language} report:`, error);
+    console.error(`[v0] Error generating ${language} report:`, error instanceof Error ? error.message : error);
     return generateFallbackReport(patient, stats, language);
   }
 }
