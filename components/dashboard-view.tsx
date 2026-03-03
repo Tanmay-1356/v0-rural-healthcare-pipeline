@@ -1,10 +1,11 @@
 "use client";
 
-import React from "react"
+import React, { useState } from "react"
 
-import useSWR from "swr";
+import useSWR, { mutate } from "swr";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Activity, AlertTriangle, FileText, Upload } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Users, Activity, AlertTriangle, FileText, Upload, Trash2 } from "lucide-react";
 import { VitalsChart } from "@/components/vitals-chart";
 import { RecentAlerts } from "@/components/recent-alerts";
 import { RecentPatients } from "@/components/recent-patients";
@@ -70,9 +71,43 @@ function StatCardSkeleton() {
 }
 
 export function DashboardView() {
+  const [clearing, setClearing] = useState(false);
   const { data, error, isLoading } = useSWR("/api/dashboard", fetcher, {
     refreshInterval: 30000, // Refresh every 30 seconds
   });
+
+  const handleClearData = async () => {
+    if (!window.confirm('Are you sure you want to delete ALL patient data? This action cannot be undone.')) {
+      return;
+    }
+
+    if (!window.confirm('This will permanently delete all patients, vitals, alerts, reports, and upload history. Continue?')) {
+      return;
+    }
+
+    setClearing(true);
+    try {
+      const response = await fetch('/api/admin/clear-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        // Refresh dashboard data
+        mutate('/api/dashboard');
+        alert('All data cleared successfully');
+      } else {
+        alert('Error: ' + (result.details || result.error));
+      }
+    } catch (err) {
+      console.error('[v0] Clear data error:', err);
+      alert('Failed to clear data');
+    } finally {
+      setClearing(false);
+    }
+  };
 
   if (error) {
     return (
@@ -87,11 +122,23 @@ export function DashboardView() {
   return (
     <div className="p-6">
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
-        <p className="mt-1 text-muted-foreground">
-          Monitor health vitals and alerts for elderly patients in rural areas
-        </p>
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
+          <p className="mt-1 text-muted-foreground">
+            Monitor health vitals and alerts for elderly patients in rural areas
+          </p>
+        </div>
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={handleClearData}
+          disabled={clearing}
+          className="gap-2"
+        >
+          <Trash2 className="h-4 w-4" />
+          {clearing ? 'Clearing...' : 'Clear All Data'}
+        </Button>
       </div>
 
       {/* Stats Grid */}
