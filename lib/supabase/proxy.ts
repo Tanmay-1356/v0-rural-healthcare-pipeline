@@ -2,19 +2,19 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function updateSession(request: NextRequest) {
+  // Check if environment variables are set
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.error('[v0] Missing Supabase environment variables');
+    // Return basic response if env vars are missing
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   })
-
-  // Check if Supabase credentials are available
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-  // If credentials are missing, skip Supabase auth and continue
-  if (!supabaseUrl || !supabaseAnonKey) {
-    console.warn('[v0] Supabase credentials not available, skipping auth')
-    return supabaseResponse
-  }
 
   try {
     const supabase = createServerClient(
@@ -53,8 +53,8 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url)
     }
   } catch (error) {
-    console.error('[v0] Supabase middleware error:', error instanceof Error ? error.message : error)
-    // Continue without auth if there's an error
+    console.error('[v0] Supabase proxy error:', error instanceof Error ? error.message : error);
+    // Continue with request even if Supabase fails
   }
 
   return supabaseResponse
